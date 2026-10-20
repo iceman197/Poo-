@@ -1,0 +1,21 @@
+{
+  "name": "iceman-code-learn",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mobile-first coding academy with a secure server-side Gemini AI endpoint",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node --check server.js && node --check src/ai.js && node --check src/labs.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0"
+  }
+}
