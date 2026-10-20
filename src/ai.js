@@ -1,70 +1,87 @@
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const DEFAULT_MODEL =
+  process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
 async function generateReply(message) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
+  const baseURL =
+    process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
 
-  if (!apiKey || !apiKey.trim()) {
-    const error = new Error('Gemini API key is missing. Add GEMINI_API_KEY in Render Environment settings.');
-    error.statusCode = 503;
-    throw error;
+  if (!apiKey) {
+    throw new Error('GROQ_API_KEY is missing from the server environment.');
   }
 
-  const endpoint =
-    'https://generativelanguage.googleapis.com/v1beta/models/' +
-    encodeURIComponent(DEFAULT_MODEL) +
-    ':generateContent';
+  if (typeof message !== 'string' || !message.trim()) {
+    throw new Error('Please enter a message.');
+  }
 
-  let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey.trim()
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: message }]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048
-        }
-      }),
-      signal: AbortSignal.timeout(60000)
-    });
-  } catch {
-    const error = new Error('Could not connect to Gemini. Check the server connection and try again.');
-    error.statusCode = 502;
-    throw error;
-  }
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const messageFromApi = data?.error?.message;
-    const error = new Error(
-      messageFromApi || `Gemini request failed with HTTP ${response.status}.`
+    const response = await fetch(
+      `${baseURL.replace(/\/+$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: DEFAULT_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are ICEMAN AI, a helpful coding assistant. ' +
+                'Help users learn programming, debug code, and build websites.'
+            },
+            {
+              role: 'user',
+              content: message.trim()
+            }
+          ],
+          max_tokens: 1024
+        }),
+        signal: controller.signal
+      }
     );
-    error.statusCode = response.status === 429 ? 429 : 502;
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      console.error('Groq API error:', response.status, data);
+      throw new Error(
+        response.status === 429
+          ? 'Groq rate limit reached. Please wait and try again.'
+          : response.status === 401
+          ? 'Groq API key is invalid or unauthorized.'
+          : `Groq API request failed (${response.status}).`
+      );
+    }
+
+    const reply = data.choices?.[0]?.message?.content;
+
+    if (typeof reply !== 'string' || !reply.trim()) {
+      throw new Error('Groq returned an empty response.');
+    }
+
+    return {
+      reply: reply.trim(),
+      model: data.model || DEFAULT_MODEL
+    };
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Groq request timed out. Please try again.');
+    }
+
     throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const reply = data?.candidates?.[0]?.content?.parts
-    ?.map(part => part.text || '')
-    .join('')
-    .trim();
-
-  if (!reply) {
-    throw new Error('Gemini returned no text. Please try asking another question.');
-  }
-
-  return { reply, model: DEFAULT_MODEL };
 }
 
-module.exports = { generateReply, DEFAULT_MODEL };
+module.exports = {
+  generateReply,
+  DEFAULT_MODEL
+};
